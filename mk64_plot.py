@@ -1,4 +1,6 @@
 import os
+import json
+import tempfile
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -24,9 +26,21 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
 
-creds = ServiceAccountCredentials.from_json_keyfile_name(
-    "service_account.json", scope
-)
+if "GSPREAD_SA_JSON" in os.environ:
+    # Running in GitHub Actions
+    sa_info = json.loads(os.environ["GSPREAD_SA_JSON"])
+
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as f:
+        json.dump(sa_info, f)
+        sa_path = f.name
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name(sa_path, scope)
+
+else:
+    # Running locally
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        "service_account.json", scope
+    )
 
 client = gspread.authorize(creds)
 sheet = client.open(SHEET_NAME).worksheet(WORKSHEET_NAME)

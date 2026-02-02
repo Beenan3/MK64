@@ -24,6 +24,8 @@ jobs:
 
       - name: Generate Charts
         run: python mk64_plot.py
+        env:
+          GSPREAD_SA_JSON: ${{ secrets.GSPREAD_SA_JSON }}
 
       - name: Commit & Push
         run: |
