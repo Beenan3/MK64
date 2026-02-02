@@ -32,6 +32,8 @@ jobs:
         run: python mk64_plot.py
         env:
           GSPREAD_SA_JSON: ${{ secrets.GSPREAD_SA_JSON }}
+          SHEET_NAME: ${{ vars.SHEET_NAME }}
+          WORKSHEET_NAME: ${{ vars.WORKSHEET_NAME }}
 
       - name: Configure Git
         run: |
