@@ -36,6 +36,4 @@ jobs:
         run: |
           git add charts/
           git commit -m "Update charts" || echo "No changes to commit"
-          git push origin main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Beenan3/MK64.git HEAD:main
