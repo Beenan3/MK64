@@ -27,10 +27,15 @@ jobs:
         env:
           GSPREAD_SA_JSON: ${{ secrets.GSPREAD_SA_JSON }}
 
-      - name: Commit & Push
+      - name: Configure Git
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git add charts/*.html
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes
+        run: |
+          git add charts/
           git commit -m "Update charts" || echo "No changes to commit"
-          git push
+          git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
