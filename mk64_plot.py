@@ -11,8 +11,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 # ==========================
 # CONFIG
 # ==========================
-SHEET_NAME = "MK64-Python Charts"
-WORKSHEET_NAME = "Form_Responses"
+SHEET_NAME = os.environ["SHEET_NAME"]
+WORKSHEET_NAME = os.environ["WORKSHEET_NAME"]
 EXPORT_IMAGE = False               # You can still enable PNG export
 EXPORT_HTML = True                 # Interactive HTML version
 OUTPUT_DIR = "charts"             # Folder for generated charts
@@ -71,57 +71,89 @@ for track in data["Track"].unique():
     TRACK_SELECTED = track
     df = data[data["Track"] == TRACK_SELECTED].sort_values("Date").reset_index(drop=True)
     
-    # Plot prep
-    df["x_idx"] = df.index
     df["DateStr"] = df["Date"].dt.strftime("%m-%d-%y")
     df["Best_Time"] = df["Time_sec"].cummin()
     
-    record_points = df[df["Best_Time"].diff() != 0]
+    # Identify record breaks
+    record_df = df[df["Time_sec"] == df["Best_Time"]].copy()
 
-    # Color mapping
-    palette = px.colors.qualitative.Dark24
-    color_map = dict(zip(df["Player"].unique(), palette))
+    # Build step ranges (start → next change)
+    record_df["End_Date"] = record_df["Date"].shift(-1)
+    record_df.loc[record_df.index[-1], "End_Date"] = record_df["Date"].iloc[-1]
 
-    # Subplots (chart + table)
+    # String dates for categorical axis
+    record_df["StartStr"] = record_df["Date"].dt.strftime("%m-%d-%y")
+    record_df["EndStr"] = record_df["End_Date"].dt.strftime("%m-%d-%y")
+
+    # ==========================
+    # CHART
+    # ==========================
     fig = make_subplots(
-        rows=2, cols=1,
+        rows=2,
+        cols=1,
         shared_xaxes=False,
         row_heights=[0.65, 0.35],
         vertical_spacing=0.08,
-        specs=[[{"type": "scatter"}], [{"type": "table"}]]
+        specs=[
+            [{"type": "scatter"}],
+            [{"type": "table"}]
+        ]
     )
 
-    # Draw step lines per record holder
-    record_change_idx = df.index[df["Best_Time"].diff().fillna(0) != 0].tolist()
-    record_change_idx.append(len(df) - 1)
+    palette = px.colors.qualitative.Dark24
+    color_map = dict(zip(df["Player"].unique(), palette))
+
+    # Indices where a new record is set
+
+    record_points = df[df["Best_Time"].diff() != 0]
 
     shown_players = set()
-    start = 0
-    for end in record_change_idx:
-        seg = df.iloc[start:end+1]
-        holder = df.loc[end, "Player"]
+
+    for i in range(len(record_df)):
+        row = record_df.iloc[i]
+
+        start_idx = df.index.get_loc(row.name)
+
+        if i < len(record_df) - 1:
+            next_row = record_df.iloc[i + 1]
+            end_idx = df.index.get_loc(next_row.name)
+        else:
+            end_idx = len(df) - 1
+
+        seg = df.iloc[start_idx:end_idx + 1]
+
+        holder = row["Player"]
         show_legend = holder not in shown_players
         shown_players.add(holder)
 
         fig.add_trace(go.Scatter(
-            x=seg["x_idx"],
+            x=seg["DateStr"],
             y=seg["Best_Time"],
             mode="lines",
             name=holder,
             showlegend=show_legend,
             hoverinfo="skip",
-            line=dict(shape="hv", width=4, color=color_map[holder])
-        ), row=1, col=1)
-        start = end
+            line=dict(
+                shape="hv",
+                width=4,
+                color=color_map[holder]
+            ),
+        ),
+        row=1,
+        col=1
+    )
 
-    # Record markers
     fig.add_trace(go.Scatter(
-        x=record_points["x_idx"],
+        x=record_points["DateStr"],
         y=record_points["Best_Time"],
         mode="markers",
         name="Record",
         showlegend=False,
-        marker=dict(size=8, color="black", symbol="circle"),
+        marker=dict(
+            size=8,
+            color="black",
+            symbol="circle"
+        ),
         hovertemplate=(
             "<b>%{customdata[0]}</b><br>"
             "Player: %{customdata[1]}<br>"
@@ -129,17 +161,24 @@ for track in data["Track"].unique():
             "<extra></extra>"
         ),
         customdata=list(zip(
-            df["DateStr"], df["Player"], df["Best_Time"].map(seconds_to_mmsscc)
+            record_points["DateStr"],
+            record_points["Player"],
+            record_points["Best_Time"].map(seconds_to_mmsscc)
         ))
-    ), row=1, col=1)
+        ),
+        row=1,
+        col=1
+    )
 
     # ==========================
-    # TABLE
+    # TABLE (Record Progression)
     # ==========================
     table_df = record_points.copy()
     table_df = table_df.sort_values("Best_Time", ascending=True)
+
     table_df["Date"] = table_df["Date"].dt.strftime("%m-%d-%y")
     table_df["Time"] = table_df["Best_Time"].apply(seconds_to_mmsscc)
+
     table_df = table_df[["Date", "Player", "Time"]]
 
     fig.add_trace(
@@ -151,7 +190,11 @@ for track in data["Track"].unique():
                 font=dict(size=12, color="black")
             ),
             cells=dict(
-                values=[table_df["Date"], table_df["Player"], table_df["Time"]],
+                values=[
+                    table_df["Date"],
+                    table_df["Player"],
+                    table_df["Time"]
+                ],
                 fill_color="white",
                 align="left",
                 font=dict(size=11)
@@ -160,22 +203,21 @@ for track in data["Track"].unique():
         row=2,
         col=1
     )
-
+        
     # ==========================
     # AXES & FORMATTING
     # ==========================
-    # Y-axis ticks
-    y_min = df["Best_Time"].min()
-    y_max = df["Best_Time"].max()
-    padding = max(0.2, (y_max - y_min) * 0.15)
-    y_lo, y_hi = y_min - padding, y_max + padding
-
     def choose_tick_step(span):
-        if span <= 0.6: return 0.05
-        elif span <= 1.5: return 0.1
-        elif span <= 3: return 0.25
-        elif span <= 6: return 0.5
-        else: return 1.0
+        if span <= 0.6:
+            return 0.05 
+        elif span <= 1.5:
+            return 0.1
+        elif span <= 3:
+            return 0.25
+        elif span <= 6:
+            return 0.5
+        else:
+            return 1.0
 
     def generate_ticks(min_val, max_val, step):
         start = (int(min_val / step)) * step
@@ -186,34 +228,58 @@ for track in data["Track"].unique():
             val += step
         return ticks
 
-    y_tick_vals = generate_ticks(y_lo, y_hi, choose_tick_step(y_hi - y_lo))
+    y_min = df["Best_Time"].min()
+    y_max = df["Best_Time"].max()
+
+    padding = max(0.2, (y_max - y_min) * 0.15)
+    y_lo = y_min - padding
+    y_hi = y_max + padding
+
+    span = y_hi - y_lo
+    step = choose_tick_step(span)
+
+    first_date_rows = df.loc[
+        df["DateStr"].ne(df["DateStr"].shift())
+    ]
+
+    x_tick_vals = first_date_rows["DateStr"].tolist()
+    x_tick_text = x_tick_vals
+
+    y_tick_vals = generate_ticks(y_lo, y_hi, step)
     y_tick_labels = [seconds_to_mmsscc(t) for t in y_tick_vals]
 
-    fig.update_yaxes(title="Lap Time", range=[y_lo, y_hi],
-                     tickvals=y_tick_vals, ticktext=y_tick_labels)
-    
-    # X-axis: only show first instance of each date
-    first_date_rows = df.loc[df["DateStr"].ne(df["DateStr"].shift())]
-    x_tick_vals = first_date_rows["x_idx"].tolist()
-    x_tick_text = first_date_rows["DateStr"].tolist()
+    x_dates = df["Date"].dt.strftime("%m-%d-%y")
+
+    if len(y_tick_vals) > 12:
+        y_tick_vals = y_tick_vals[::2]
+        y_tick_labels = y_tick_labels[::2]
+
+    fig.update_yaxes(
+        title="3 Lap Time",
+        range=[y_lo, y_hi],
+        tickvals=y_tick_vals,
+        ticktext=y_tick_labels,
+    )
 
     fig.update_xaxes(
         type="category",
         categoryorder="array",
-        categoryarray=df["x_idx"].tolist(),
+        categoryarray=df["DateStr"].tolist(),
         tickmode="array",
         tickvals=x_tick_vals,
         ticktext=x_tick_text,
         tickangle=-30,
-        title="Date"
+        title="Date",
+        row=1,
+        col=1
     )
 
     fig.update_layout(
         title=f"{TRACK_SELECTED} – Record Progression",
         hovermode="closest",
         legend_title="Record Holder",
-        template="plotly_white",
-        height=900,
+        template="seaborn",
+        height=1200,
         margin=dict(t=60, b=40)
     )
 
